@@ -14,6 +14,7 @@ class ImgAugTransform:
     def __call__(self, img):
 
         aug = random.randint(0, 3)
+        # img = img * 255 # for kaggle data
         img  =  img.astype("uint8")
         if aug == 0:
             aug_img = self.aug_brightness(image=img)

@@ -1,6 +1,6 @@
 .vscode
 /data
-
+eval_fig
 .ipynb_checkpoints/
 
 **/__pycache__/

@@ -47,49 +47,62 @@ class Block(nn.Module):
             self.shortcut = None
 
     def __call__(self, x):
-        out = nn.relu(self.bn1(self.conv1(x)))
+        out = nn.mish(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
         if self.shortcut is None:
             out += x
         else:
             out += self.shortcut(x)
-        out = nn.relu(out)
+        out = nn.mish(out)
         return out
 
 class ResNet(nn.Module):
     def __init__(self, block, num_blocks):
         super().__init__()
-        self.conv1 = nn.Conv2d(3, 16, kernel_size=7, stride=2, padding=3, bias=False)
-        self.bn1 = nn.BatchNorm(16)
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        self.bn1 = nn.BatchNorm(64)
 
-        self.layer1 = self._make_layer(block, 16, 16, num_blocks[0], stride=1)
-        self.layer2 = self._make_layer(block, 16, 32, num_blocks[1], stride=2)
-        self.layer3 = self._make_layer(block, 32, 64, num_blocks[1], stride=2)
-        self.layer4 = self._make_layer(block, 64, 128, num_blocks[2], stride=2)
+        self.layer0 = self._make_layer(block, 64, 64, num_blocks[0], stride=1)
+        self.layer1 = self._make_layer(block, 64, 128, num_blocks[1], stride=2)
+        self.layer2 = self._make_layer(block, 128, 128, num_blocks[2], stride=1)
+        self.layer3 = self._make_layer(block, 128, 256, num_blocks[3], stride=2)
+        self.layer4 = self._make_layer(block, 256, 256, num_blocks[3], stride=1)
+        self.layer5 = self._make_layer(block, 256, 512, num_blocks[3], stride=2)
+
 
         self.upsample = nn.Upsample(scale_factor=2, mode='linear', align_corners=True)
 
-        self.conv_cat1 = nn.Conv2d(
-            192, 64, kernel_size=1, stride=1, padding=0, bias=True
-        )
+        self.conv_cat1 = nn.Sequential(nn.Conv2d(768, 512, kernel_size=3, stride=1, padding=1, bias=True),
+                                       nn.ReLU()
+                                    #    nn.BatchNorm(1024)
+                                       )
 
-        self.conv_cat2 = nn.Conv2d(
-            96, 64, kernel_size=1, stride=1, padding=0, bias=True
-        )
+        self.conv_cat2 = nn.Sequential(nn.Conv2d(640, 256, kernel_size=3, stride=1, padding=1, bias=True),
+                                       nn.ReLU()
+                                    #    nn.BatchNorm(512)
+                                       )
 
-        self.conv_cat3 = nn.Conv2d(
-            96, 64, kernel_size=1, stride=1, padding=0, bias=True
-        )
+        self.conv_cat3 = nn.Sequential(nn.Conv2d(320, 128, kernel_size=3, stride=1, padding=1, bias=True),
+                                       nn.ReLU()
+                                    #    nn.BatchNorm(256)
+                                       )
+
+        # self.conv_cat4 = nn.Sequential(nn.Conv2d(320, 128, kernel_size=3, stride=1, padding=1, bias=True),
+        #                                nn.ReLU()
+        #                             #    nn.BatchNorm(128)
+        #                                )
 
         self.output = nn.Conv2d(
-            64, 1, kernel_size=1, stride=1, padding=0, bias=True
+            128, 1, kernel_size=1, stride=1, padding=0, bias=True
         )
-
         init_fn = nn.init.he_normal()
         self.conv1.weight = init_fn( self.conv1.weight)
-        self.conv_cat1.weight = init_fn( self.conv_cat1.weight)
-        self.conv_cat2.weight = init_fn( self.conv_cat2.weight)
-        self.conv_cat3.weight = init_fn( self.conv_cat3.weight)
+        self.conv_cat1.layers[0].weight = init_fn( self.conv_cat1.layers[0].weight)
+        self.conv_cat2.layers[0].weight = init_fn( self.conv_cat2.layers[0].weight)
+        self.conv_cat3.layers[0].weight = init_fn( self.conv_cat3.layers[0].weight)
+        # self.conv_cat4.layers[0].weight = init_fn( self.conv_cat4.layers[0].weight)
+
+
         self.output.weight = init_fn( self.output.weight)
 
 
@@ -107,35 +120,44 @@ class ResNet(nn.Module):
 
     def __call__(self, x):
         # encoder
-        x = nn.relu(self.bn1(self.conv1(x)))
-        c = x
-        x = self.layer1(x)
-        c0 = x
-        x = self.layer2(x)
-        c1 = x
-        x = self.layer3(x)
+        x = nn.mish(self.bn1(self.conv1(x)))
+        x = self.layer0(x)
         c2 = x
+        # c0 = x
+        x = self.layer1(x)
+        x = self.layer2(x)
+        c3 = x
+        
+        # c2 = x
+        x = self.layer3(x)
         x = self.layer4(x)
-
+        c4 = x
+        
+        x = self.layer5(x)
         # decoder
         x = self.upsample(x)
-        x = mx.concatenate([x, c2], axis=-1)
+        x = mx.concatenate([x, c4], axis=-1)
         x = self.conv_cat1(x)
-        x = self.upsample(x)    
-        x = mx.concatenate([x, c1], axis=-1)
-        x = self.conv_cat2(x)
-        x = self.upsample(x)
-        x = mx.concatenate([x, c0, c], axis=-1)
-        x = self.conv_cat3(x)
-        x = self.upsample(x)
 
+        x = self.upsample(x)    
+        x = mx.concatenate([x, c3], axis=-1)
+        
+        x = self.conv_cat2(x)
+
+        x = self.upsample(x)
+        x = mx.concatenate([x, c2], axis=-1)
+        
+        x = self.conv_cat3(x)
+
+        x = self.upsample(x)
+        
         x = self.output(x)
 
         return x
 
 
 def resnet20(**kwargs):
-    return ResNet(Block, [3, 3, 3], **kwargs)
+    return ResNet(Block, [3, 3, 3, 3], **kwargs)
 
 
 def resnet32(**kwargs):
@@ -161,8 +183,8 @@ def resnet1202(**kwargs):
 if __name__ == "__main__":
     import numpy as np
 
-    input = mx.array(np.random.rand(16, 128, 256, 3))
-   
+    input = mx.array(np.random.rand(4, 224, 224, 3))
+
     model = resnet20()
     pred = model(input)
 
